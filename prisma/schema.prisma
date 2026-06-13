@@ -1,0 +1,193 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id               String            @id @default(uuid())
+  username         String            @unique
+  email            String            @unique
+  password         String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  oauthConnections OAuthConnection[]
+  sessions         Session[]
+  trackedRepos     TrackedRepo[]
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OAuthConnection {
+  id          String    @id @default(uuid())
+  userId      String
+  provider    String
+  tokenExpiry DateTime?
+  scope       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  accessToken String?
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, provider])
+}
+
+model TrackedRepo {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  githubRepoId String  @unique
+  fullName     String
+  name         String
+  owner        String
+  isPrivate    Boolean
+  webhookId    String?
+
+  lastSyncedAt DateTime?
+  syncStatus   TrackState @default(pending)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  githubRepoUrl String?
+
+  syncError       String?
+  syncRequestedAt DateTime?
+
+  pullRequests PullRequest[]
+  commits      Commit[]
+
+  @@unique([userId, githubRepoId])
+}
+
+model PullRequest {
+  id String @id @default(uuid())
+
+  repoId String
+  repo   TrackedRepo @relation(fields: [repoId], references: [githubRepoId], onDelete: Cascade)
+
+  githubPrId  String @unique
+  number      Int
+  title       String
+  authorLogin String
+
+  state   PRState
+  isDraft Boolean @default(false)
+
+  additions    Int @default(0)
+  deletions    Int @default(0)
+  changedFiles Int @default(0)
+
+  createdAt DateTime
+  updatedAt DateTime
+  mergedAt  DateTime?
+  closedAt  DateTime?
+
+  firstReviewAt     DateTime?
+  timeToFirstReview Int?
+  timeToMerge       Int?
+
+  cycleTime Float?
+  prSize    PRSize?
+
+  metricsComputedAt DateTime?
+
+  reviews            PRReview[]
+  pullRequestCommits PullRequestCommit[]
+
+  @@unique([repoId, githubPrId])
+}
+
+model PRReview {
+  id   String      @id @default(uuid())
+  prId String
+  pr   PullRequest @relation(fields: [prId], references: [githubPrId], onDelete: Cascade)
+
+  reviewerLogin String
+  state         PRReviewState
+
+  submittedAt DateTime
+  createdAt   DateTime @default(now())
+}
+
+model Commit {
+  id     String      @id @default(uuid())
+  repoId String
+  repo   TrackedRepo @relation(fields: [repoId], references: [githubRepoId], onDelete: Cascade)
+
+  url String
+  sha String
+
+  commentCount Int?
+  message      String
+
+  additions Int?
+  deletions Int?
+  total     Int?
+
+  authorLogin String?
+  authorEmail String
+  committedAt DateTime
+
+  createdAt DateTime @default(now())
+
+  pullRequestCommits PullRequestCommit[]
+  commitFiles        CommitFile[]
+
+  @@unique([repoId, sha])
+}
+
+model CommitFile {
+  id       String @id @default(uuid())
+  commitId String
+  commit   Commit @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  filename  String
+  additions Int
+  deletions Int
+  changes   Int
+}
+
+model PullRequestCommit {
+  prId     String
+  pr       PullRequest @relation(fields: [prId], references: [githubPrId], onDelete: Cascade)
+  commitId String
+  commit   Commit      @relation(fields: [commitId], references: [id], onDelete: Cascade)
+
+  @@id([prId, commitId])
+}
+
+enum TrackState {
+  pending
+  syncing
+  done
+  error
+}
+
+enum PRState {
+  open
+  closed
+  merged
+}
+
+enum PRReviewState {
+  APPROVED
+  CHANGES_REQUESTED
+  COMMENTED
+}
+
+enum PRSize {
+  small
+  medium
+  large
+  xl
+}
