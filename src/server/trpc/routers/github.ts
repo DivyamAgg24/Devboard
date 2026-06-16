@@ -5,6 +5,7 @@ import { getGithubSession } from "@/src/utils/session";
 import { Octokit } from "@octokit/rest"
 import { RepoMetrics, SyncSchema, TrackRepo, UntrackRepo } from "@/src/server/trpc/schemas/github";
 import { registerWebhook, upsertPullRequest } from "@/src/lib/github";
+import { computeRepoMetrics } from "@/src/lib/metrics";
 
 
 export const gitRouter = createTRPCRouter({
@@ -154,10 +155,11 @@ export const gitRouter = createTRPCRouter({
 
             // Fetch PR details + reviews in parallel (much faster than sequential)
             await Promise.all(pullRequests.map(async (pr) => {
-                const [{ data: detail }, { data: reviews }, {data: commits}] = await Promise.all([
+                const [{ data: detail }, { data: reviews }, { data: commits }] = await Promise.all([
                     octokit.rest.pulls.get({ owner, repo, pull_number: pr.number }),
                     octokit.rest.pulls.listReviews({ owner, repo, pull_number: pr.number }),
-                    octokit.rest.pulls.listCommits({owner, repo, pull_number: pr.number,
+                    octokit.rest.pulls.listCommits({
+                        owner, repo, pull_number: pr.number,
                     })
                 ])
 
@@ -190,7 +192,7 @@ export const gitRouter = createTRPCRouter({
         }
     }),
 
-    repoMetrics: protectedProcedure.input(RepoMetrics).query(async ({ctx, input}) => {
+    repoMetrics: protectedProcedure.input(RepoMetrics).query(async ({ ctx, input }) => {
         const trackedRepo = await db.trackedRepo.findFirst({
             where: {
                 owner: input.owner,
@@ -199,11 +201,54 @@ export const gitRouter = createTRPCRouter({
             }
         })
 
-        if(!trackedRepo){
+        if (!trackedRepo) {
             throw new TRPCError({ code: "NOT_FOUND", message: "Repo not tracked" })
         }
 
-        const prs = await db.pullRequest.findMany
+        const prs = await db.pullRequest.findMany({
+            where: {
+                repoId: trackedRepo.githubRepoId
+            },
+            select: {
+                githubPrId: true,
+                number: true,
+                title: true,
+                authorLogin: true,
+                state: true,
+                isDraft: true,
+                additions: true,
+                deletions: true,
+                prSize: true,
+                cycleTime: true,
+
+                createdAt: true,
+                mergedAt: true,
+                timeToFirstReview: true,
+                timeToMerge: true,
+                reviews: {
+                    select: {
+                        reviewerLogin: true
+                    }
+                },
+                pullRequestCommits: {
+                    select: {
+                        commit: {
+                            select: {
+                                committedAt: true,
+                                commitFiles: {
+                                    select: {
+                                        filename: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+
+        const metrics = computeRepoMetrics(prs as any)
+        return { metrics, repo: trackedRepo, prs: prs }
     })
 })
 
