@@ -18,7 +18,7 @@ export const NavBar = ({ session }: {
             <Link href="#how-it-works" className="hidden text-sm text-gray-500 hover:text-gray-900 transition-colors sm:block">
                 How it works
             </Link>
-            {session ? (
+            {session.user ? (
                 <Link
                     href="/dashboard"
                     className="rounded-full bg-[#332fb5] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#2a26a0] transition-colors"
