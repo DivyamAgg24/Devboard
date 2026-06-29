@@ -73,7 +73,7 @@ function Step({
 }) {
     return (
         <div className="flex gap-5">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#332fb5] text-sm font-semibold text-white">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#332fb5] text-sm font-semibold text-white">
                 {step}
             </div>
             <div className="flex flex-col gap-1 pt-1">
@@ -240,7 +240,7 @@ export default async function Home() {
                 <section id="how-it-works" className="border-t border-gray-100 py-20">
                     <div className="grid grid-cols-1 gap-16 lg:grid-cols-2">
                         <div>
-                            <p className="text-xs font-medium uppercase tracking-widest text-[#332pb5] text-[#332fb5]">Setup</p>
+                            <p className="text-xs font-medium uppercase tracking-widest text-[#332pb5]">Setup</p>
                             <h2 className="mt-2 text-3xl font-semibold text-gray-900">Running in under two minutes</h2>
                             <p className="mt-3 text-gray-500">
                                 No config files. No YAML. Connect GitHub, pick a repo, and your metrics appear.
