@@ -273,18 +273,18 @@ export default function SignupPage() {
             },
             onError: (err) => {
                 setServerError(parseErrorMessage(err))
-                // if (err instanceof TRPCClientError) {
-                //     if (err.data?.code === "CONFLICT") {
-                //         if (err.message.toLowerCase().includes("username")) {
-                //             setErrors((prev) => ({ ...prev, username: err.message }))
-                //             setTouched((prev) => ({ ...prev, username: true }))
-                //         } else {
-                //             setErrors((prev) => ({ ...prev, email: err.message }))
-                //             setTouched((prev) => ({ ...prev, email: true }))
-                //         }
-                //     }
-                //     // INTERNAL_SERVER_ERROR surfaces via signup.error below
-                // }
+                if (err instanceof TRPCClientError) {
+                    if (err.data?.code === "CONFLICT") {
+                        if (err.message.toLowerCase().includes("username")) {
+                            setErrors((prev) => ({ ...prev, username: err.message }))
+                            setTouched((prev) => ({ ...prev, username: true }))
+                        } else {
+                            setErrors((prev) => ({ ...prev, email: err.message }))
+                            setTouched((prev) => ({ ...prev, email: true }))
+                        }
+                    }
+                    // INTERNAL_SERVER_ERROR surfaces via signup.error below
+                }
             },
         })
     )
@@ -366,7 +366,7 @@ export default function SignupPage() {
                     </p>
 
                     {/* Server error banner */}
-                    {/* {signup.error instanceof TRPCClientError &&
+                    {signup.error instanceof TRPCClientError &&
                         signup.error.data?.code === "INTERNAL_SERVER_ERROR" && (
                           <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700 ">
                               <svg viewBox="0 0 16 16" className="mt-0.5 h-4 w-4 shrink-0" fill="currentColor">
@@ -374,7 +374,7 @@ export default function SignupPage() {
                               </svg>
                               {signup.error.message}
                           </div>
-                      )} */}
+                      )}
                     {serverError && (
                         <div className="mt-5 flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-700">
                             <svg viewBox="0 0 16 16" className="mt-0.5 h-4 w-4 shrink-0" fill="currentColor">

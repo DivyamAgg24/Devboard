@@ -9,14 +9,14 @@ export type GitHubCommit = Awaited<ReturnType<Octokit["rest"]["pulls"]["listComm
 
 export type PRSizeLabel = "small" | "medium" | "large" | "xl"
 
-export function computeMetrics(pr: GitHubPR, reviews: GitHubReview[]) {
+export function computeMetrics(pr: GitHubPR | any, reviews: GitHubReview[] | any, prAuthorLogin: String) {
     const openedAt = new Date(pr.created_at).getTime()
 
     // First review = earliest submitted_at across all reviews
     const reviewTimes = reviews
-        .filter(r => r.submitted_at)
-        .map(r => new Date(r.submitted_at!).getTime())
-        .sort((a, b) => a - b)
+        .filter((r: any) => r.submitted_at && r.user?.login !== prAuthorLogin)
+        .map((r: any) => new Date(r.submitted_at!).getTime())
+        .sort((a: any, b: any) => a - b)
 
     const firstReviewAt = reviewTimes.length > 0 ? new Date(reviewTimes[0]) : null
 
@@ -109,6 +109,7 @@ export type RepoMetrics = {
 }
 
 type PRRow = {
+    id: string,
     githubPrId: string
     authorLogin: string
     state: string

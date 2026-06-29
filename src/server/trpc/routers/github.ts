@@ -3,7 +3,7 @@ import { createTRPCRouter, protectedProcedure } from "../trpc"
 import { TRPCError } from "@trpc/server";
 import { getGithubSession } from "@/src/utils/session";
 import { Octokit } from "@octokit/rest"
-import { RepoMetrics, SyncSchema, TrackRepo, UntrackRepo } from "@/src/server/trpc/schemas/github";
+import { PRFilters, RepoMetrics, SyncSchema, TrackRepo, UntrackRepo } from "@/src/server/trpc/schemas/github";
 import { registerWebhook, upsertPullRequest } from "@/src/lib/github";
 import { computeRepoMetrics } from "@/src/lib/metrics";
 
@@ -249,6 +249,64 @@ export const gitRouter = createTRPCRouter({
 
         const metrics = computeRepoMetrics(prs as any)
         return { metrics, repo: trackedRepo, prs: prs }
+    }),
+
+    repoPRs: protectedProcedure.input(PRFilters).query(async ({ctx, input}) => {
+        const {owner, name, cursor, limit, state, size, search, dateFrom, dateTo} = input
+        const trackedRepo = await db.trackedRepo.findFirst({
+            where: { owner, name, userId: ctx.session.user.id },
+            select: { githubRepoId: true }
+        })
+        if (!trackedRepo) {throw new TRPCError({ code: "NOT_FOUND", message: "Repo not tracked" })}
+        const prs = await db.pullRequest.findMany({
+            where: {
+                repoId: trackedRepo.githubRepoId,
+                ...(state !== "all" && {state}),
+                ...(size !== "all" && {prSize: size}),
+                ...(search && {
+                    OR: [
+                        {title: {contains: search, mode: "insensitive" as const}},
+                        {authorLogin: {contains: search, mode: "insensitive" as const}},
+                        {number: {equals: isNaN(Number(search)) ? undefined : Number(search)}}
+                    ]
+                }),
+                ...(dateFrom || dateTo ? {
+                    createdAt: {
+                        ...(dateFrom && {gte: new Date(dateFrom)}),
+                        ...(dateTo && {lte: new Date(dateTo)}),
+                    }
+                }: {})
+            },
+            take: limit + 1,
+            ...(cursor ? {
+                cursor: {githubPrId: cursor},
+                skip: 1
+            }: {}),
+            orderBy: {createdAt: "desc"},
+            select: {
+                githubPrId:        true,
+                number:            true,
+                title:             true,
+                authorLogin:       true,
+                state:             true,
+                isDraft:           true,
+                prSize:            true,
+                additions:         true,
+                deletions:         true,
+                cycleTime:         true,
+                timeToFirstReview: true,
+                mergedAt:          true,
+                createdAt:         true,
+            }
+        })
+
+        let nextCursor: string | null = null
+        if (prs.length > limit){
+            const nextItem = prs.pop()
+            nextCursor = nextItem!.githubPrId
+        }
+
+        return {prs, nextCursor}
     })
 })
 

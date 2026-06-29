@@ -2,7 +2,7 @@ import "server-only"
 import { cookies } from "next/headers"
 import { db } from "@/src/lib/prisma"
 import { decrypt, encrypt } from "@/src/lib/session"
-import { COOKIE_NAME, GITHUB_SESSION_COOKIE_NAME } from "@/src/lib/constants"
+import { COOKIE_NAME } from "@/src/lib/constants"
 
 export async function setSessionCookie(cookieName: string, encryptedSessionId: string, expiresAt: Date) {
     const cookieStore = await cookies()
@@ -10,7 +10,7 @@ export async function setSessionCookie(cookieName: string, encryptedSessionId: s
     cookieStore.set(cookieName, encryptedSessionId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        sameSite: "strict",
         expires: expiresAt,
         path: "/",
     });
@@ -76,28 +76,12 @@ export async function deleteAllSessions(userId: string): Promise<void> {
     cookieStore.delete(COOKIE_NAME);
 }
 
-export async function createGitHubSession(token: string) {
-    const cookieStore = await cookies()
-
-    cookieStore.set(GITHUB_SESSION_COOKIE_NAME, token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-    });
-    
-}
-
 export async function getGithubSession() {
     
     const session = await getSession()
     if (!session || !session.user) {
         return null
     }
-    const cookieStore = await cookies()
-    const cookie = cookieStore.get(GITHUB_SESSION_COOKIE_NAME)
-    if (!cookie?.value) { return null }
-    const token = cookie.value
     
     const gitHubSession = await db.oAuthConnection.findUnique({
         where: {
@@ -109,9 +93,8 @@ export async function getGithubSession() {
     })
 
     if(!gitHubSession){
-        cookieStore.delete(GITHUB_SESSION_COOKIE_NAME)
         return null
     }
 
-    return {success: true, token}
+    return {success: true, token: gitHubSession.accessToken}
 }

@@ -81,7 +81,7 @@ function ContributorRow({ contributor, rank }: { contributor: Contributor; rank:
                 />
                 <Stat
                     icon={<ClockIcon className="size-3.5" />}
-                    value={formatMergeTime(contributor.avgMergeTime)}
+                    value={formatMergeTime(contributor.avgTimeToMerge)}
                     label="avg merge time"
                 />
             </div>

@@ -19,7 +19,7 @@ function deriveReviewState(state: string): "APPROVED" | "CHANGES_REQUESTED" | "C
 export const upsertPullRequest = async (githubrepoId: string, pr: GitHubPR, reviews: GitHubReview[], commits?: GitHubCommit) => {
 
     const state = derivePRState(pr)
-    const { firstReviewAt, timeToFirstReview, timeToMerge } = computeMetrics(pr, reviews)
+    const { firstReviewAt, timeToFirstReview, timeToMerge } = computeMetrics(pr, reviews, pr.user.login)
     const githubPrId = String(pr.id)
 
     const firstCommitAt = commits?.length ? new Date(Math.min(...commits.map(c => new Date(c.commit.author?.date ?? c.commit.committer?.date ?? new Date()).getTime()))) : null
@@ -76,7 +76,7 @@ export const upsertPullRequest = async (githubrepoId: string, pr: GitHubPR, revi
             metricsComputedAt: new Date()
         }
     })
-
+    console.log("Upserted pr in upsertPullRequest ================ : ", upsertedPR)
     const validReviews = reviews.filter(r => {
         const state = deriveReviewState(r.state)
         return state !== null && r.submitted_at
@@ -97,6 +97,7 @@ export const upsertPullRequest = async (githubrepoId: string, pr: GitHubPR, revi
     if (commits && commits?.length > 0) {
         const commitIds: string[] = []
         for (const c of commits) {
+            console.log('inside upsert pull request creating commit entry : ', c)
             const dbCommit = await db.commit.upsert({
                 where: {
                     repoId_sha: {
@@ -136,13 +137,23 @@ export const upsertPullRequest = async (githubrepoId: string, pr: GitHubPR, revi
             commitIds.push(dbCommit.id)
 
         }
-        await db.pullRequestCommit.createMany({
-            data: commitIds.map(commitId => ({
-                prId: upsertedPR.githubPrId,
-                commitId,
-            })),
-            skipDuplicates: true,
-        })
+        if (commitIds && commitIds.length > 0){
+            for (const cid of commitIds){
+                await db.pullRequestCommit.upsert({
+                    where: {
+                        prId_commitId: {
+                            commitId: cid,
+                            prId: upsertedPR.githubPrId
+                        }
+                    },
+                    update: {},
+                    create: {
+                        prId: upsertedPR.githubPrId,
+                        commitId: cid,
+                    }
+                })
+            }
+        }
     }
 
     return upsertedPR
@@ -179,6 +190,7 @@ export async function registerWebhook(
         // 422 = webhook already exists for this URL
         if (e.status === 422) {
             console.log(`Webhook already registered for ${owner}/${repo}`)
+            console.log("E: ", e)
             return null
         }
         throw e

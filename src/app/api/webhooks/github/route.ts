@@ -1,8 +1,8 @@
 import { upsertPullRequest, verifyWebhookSignature } from "@/src/lib/github";
+import { classifyPRSize, computeCycleTime, computeMetrics } from "@/src/lib/metrics";
 import { db } from "@/src/lib/prisma";
 import { getGithubSession } from "@/src/utils/session";
 import { Octokit } from "@octokit/rest";
-import { error } from "console";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -17,7 +17,17 @@ export async function POST(req: NextRequest) {
     const body = JSON.parse(payload)
     if (event === "pull_request") {
         console.log("Event is pull_request")
-        await handlePullRequestEvent(body)
+        const action = body.action
+        const refetchActions = ["closed", "synchronize", "ready_for_review", "converted_to_draft"]
+
+        // These actions only need a lightweight metric recompute from existing DB data
+        const recomputeOnly = ["reopened"]
+
+        if (refetchActions.includes(action)) {
+            await handlePullRequestEvent(body)
+        } else if (recomputeOnly.includes(action)) {
+            await recomputeMetricsFromDB(body)
+        }
     } else if (event === "pull_request_review") {
         console.log("Event is pull_request_review")
         await handlePullRequestReviewEvent(body)
@@ -45,27 +55,69 @@ async function handlePullRequestEvent(body: any) {
             }
         }
     })
-    if (!trackedRepo){
+    if (!trackedRepo) {
         return
     }
 
     const token = (await getGithubSession())?.token
     if (!token) return
 
-    const octokit = new Octokit({auth: token})
+    const octokit = new Octokit({ auth: token })
     const prNumber = body.pull_request.number
     const owner = body.repository.owner.login
     const repo = body.repository.name
-    const [{data: detail}, {data: reviews}] = await Promise.all([
-        octokit.rest.pulls.get({owner, repo, pull_number: prNumber}),
-        octokit.rest.pulls.listReviews({owner, repo, pull_number: prNumber})
+    const [{ data: detail }, { data: reviews }] = await Promise.all([
+        octokit.rest.pulls.get({ owner, repo, pull_number: prNumber }),
+        octokit.rest.pulls.listReviews({ owner, repo, pull_number: prNumber })
     ])
 
     await upsertPullRequest(trackedRepo.githubRepoId, detail, reviews)
-    
+
 }
 
 async function handlePullRequestReviewEvent(body: any) {
-    // A review event also contains the full PR — reuse the same handler
     await handlePullRequestEvent(body)
+}
+
+
+async function recomputeMetricsFromDB(body: any) {
+    const repoGithubId = String(body.repository.id)
+    const githubPrId   = String(body.pull_request.id)
+
+    const pr = await db.pullRequest.findUnique({
+        where:   { githubPrId },
+        include: {
+            reviews: true,
+            pullRequestCommits: {
+                include: { commit: true }
+            }
+        }
+    })
+
+    if (!pr) return
+
+    const commits = pr.pullRequestCommits.map(pc => pc.commit)
+    const firstCommitAt = commits.length > 0
+        ? new Date(Math.min(...commits.map(c => c.committedAt.getTime())))
+        : null
+
+    const cycleTime = computeCycleTime(pr.createdAt, pr.mergedAt, firstCommitAt)
+    const prSize    = classifyPRSize(pr.additions, pr.deletions)
+    const { firstReviewAt, timeToFirstReview } = computeMetrics(
+        
+        { created_at: pr.createdAt.toISOString(), merged_at: pr.mergedAt?.toISOString() ?? null } as any,
+        pr.reviews.map(r => ({ submitted_at: r.submittedAt.toISOString(), state: r.state })) as any,
+        pr.authorLogin
+    )
+
+    await db.pullRequest.update({
+        where: { githubPrId },
+        data: {
+            cycleTime,
+            prSize,
+            firstReviewAt,
+            timeToFirstReview,
+            metricsComputedAt: new Date(),
+        }
+    })
 }

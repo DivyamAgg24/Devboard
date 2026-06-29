@@ -1,5 +1,3 @@
-// src/lib/session.ts  — replace encrypt/decrypt with Web Crypto
-
 const ALGORITHM = "AES-GCM"
 
 function getSecret(): Promise<CryptoKey> {

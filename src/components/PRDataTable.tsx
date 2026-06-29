@@ -1,9 +1,6 @@
 // src/components/PRDataTable.tsx
-"use client"
 
-import { useSuspenseQuery } from "@tanstack/react-query"
-import { useTRPC } from "@/src/trpc/client"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import {
     Card,
     CardContent,
@@ -29,77 +26,80 @@ import {
 } from "@/src/components/ui/select"
 import { Input } from "@/src/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/src/components/ui/avatar"
-import { ExternalLinkIcon, SearchIcon } from "lucide-react"
+import { ExternalLinkIcon, Loader2Icon, SearchIcon } from "lucide-react"
+import { useTRPC } from "../trpc/client"
+import { useDebounce } from "@/src/hooks/useDebounce"
+import { useInfiniteQuery } from "@tanstack/react-query"
+import { Button } from "./ui/button"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatMins(mins: number | null): string {
     if (mins === null) return "—"
-    if (mins < 60)    return `${Math.round(mins)}m`
+    if (mins < 60) return `${Math.round(mins)}m`
     const h = Math.floor(mins / 60)
     if (h < 24) return `${h}h`
     return `${Math.floor(h / 24)}d`
 }
 
 const STATE_STYLES: Record<string, string> = {
-    open:   "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800",
+    open: "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-400 dark:border-emerald-800",
     merged: "bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-950 dark:text-purple-400 dark:border-purple-800",
     closed: "bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:border-zinc-700",
 }
 
 const SIZE_STYLES: Record<string, string> = {
-    small:  "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800",
+    small: "bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-950 dark:text-sky-400 dark:border-sky-800",
     medium: "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-400 dark:border-amber-800",
-    large:  "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800",
-    xl:     "bg-red-100 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800",
+    large: "bg-orange-100 text-orange-700 border-orange-200 dark:bg-orange-950 dark:text-orange-400 dark:border-orange-800",
+    xl: "bg-red-100 text-red-700 border-red-200 dark:bg-red-950 dark:text-red-400 dark:border-red-800",
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface Props {
-    repoId: string // "owner/name"
+    owner: string
+    name:  string
 }
 
-export function PRDataTable({ repoId }: Props) {
+export function PRDataTable({ owner, name }: Props) {
     const trpc = useTRPC()
-    const [owner, name] = repoId.split("/")
-
-    const { data } = useSuspenseQuery(trpc.github.repoMetrics.queryOptions({ owner, name }))
-    const { metrics } = data
 
     const [search,      setSearch]      = useState("")
-    const [stateFilter, setStateFilter] = useState<string>("all")
-    const [sizeFilter,  setSizeFilter]  = useState<string>("all")
-    const [page,        setPage]        = useState(0)
-    const PAGE_SIZE = 15
+    const [stateFilter, setStateFilter] = useState("all")
+    const [sizeFilter,  setSizeFilter]  = useState("all")
 
-    // Get flat PR list from metrics — you may want a dedicated tRPC query
-    // for large repos. For now pull from the metrics data already fetched.
-    const { prs } = data as any // will be added to tRPC response below
+    const debouncedSearch = useDebounce(search, 300)
 
-    if (!prs?.length) {
-        return (
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base">Pull Requests</CardTitle>
-                    <CardDescription>No pull requests found.</CardDescription>
-                </CardHeader>
-            </Card>
+    const {
+        data,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+        isLoading,
+    } = useInfiniteQuery(
+        trpc.github.repoPRs.infiniteQueryOptions(
+            {
+                owner,
+                name,
+                limit:  20,
+                state:  stateFilter as any,
+                size:   sizeFilter  as any,
+                search: debouncedSearch || undefined,
+            },
+            {
+                getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+            }
         )
-    }
+    )
 
-    const filtered = prs.filter((pr: any) => {
-        const matchSearch = !search
-            || pr.title.toLowerCase().includes(search.toLowerCase())
-            || String(pr.number).includes(search)
-            || pr.authorLogin.toLowerCase().includes(search.toLowerCase())
-        const matchState = stateFilter === "all" || pr.state === stateFilter
-        const matchSize  = sizeFilter  === "all" || pr.prSize === sizeFilter
-        return matchSearch && matchState && matchSize
-    })
+    // Flatten pages into a single list
+    const prs = data?.pages.flatMap(p => p.prs) ?? []
+    const totalFetched = prs.length
 
-    const pages    = Math.ceil(filtered.length / PAGE_SIZE)
-    const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+    const handleFilterChange = useCallback((setter: (v: string) => void) => (v: string) => {
+        setter(v)
+    }, [])
 
     return (
         <Card>
@@ -108,7 +108,7 @@ export function PRDataTable({ repoId }: Props) {
                     <div>
                         <CardTitle className="text-base">Pull Requests</CardTitle>
                         <CardDescription>
-                            {filtered.length} of {prs.length} PRs
+                            {isLoading ? "Loading..." : `${totalFetched} loaded${hasNextPage ? " · more available" : ""}`}
                         </CardDescription>
                     </div>
 
@@ -119,11 +119,11 @@ export function PRDataTable({ repoId }: Props) {
                             <Input
                                 placeholder="Search PRs..."
                                 value={search}
-                                onChange={e => { setSearch(e.target.value); setPage(0) }}
+                                onChange={e => setSearch(e.target.value)}
                                 className="h-8 w-44 pl-8 text-sm"
                             />
                         </div>
-                        <Select value={stateFilter} onValueChange={v => { setStateFilter(v); setPage(0) }}>
+                        <Select value={stateFilter} onValueChange={handleFilterChange(setStateFilter)}>
                             <SelectTrigger className="h-8 w-28 text-xs">
                                 <SelectValue placeholder="State" />
                             </SelectTrigger>
@@ -134,7 +134,7 @@ export function PRDataTable({ repoId }: Props) {
                                 <SelectItem value="closed">Closed</SelectItem>
                             </SelectContent>
                         </Select>
-                        <Select value={sizeFilter} onValueChange={v => { setSizeFilter(v); setPage(0) }}>
+                        <Select value={sizeFilter} onValueChange={handleFilterChange(setSizeFilter)}>
                             <SelectTrigger className="h-8 w-28 text-xs">
                                 <SelectValue placeholder="Size" />
                             </SelectTrigger>
@@ -150,7 +150,7 @@ export function PRDataTable({ repoId }: Props) {
                 </div>
             </CardHeader>
 
-            <CardContent className="px-0 pb-0">
+            <CardContent className="px-0">
                 <Table>
                     <TableHeader>
                         <TableRow className="hover:bg-transparent">
@@ -159,97 +159,115 @@ export function PRDataTable({ repoId }: Props) {
                             <TableHead className="hidden sm:table-cell">Author</TableHead>
                             <TableHead className="hidden md:table-cell">State</TableHead>
                             <TableHead className="hidden md:table-cell">Size</TableHead>
-                            <TableHead className="hidden lg:table-cell text-right">Review time</TableHead>
-                            <TableHead className="hidden lg:table-cell text-right pr-6">Cycle time</TableHead>
+                            <TableHead className="hidden lg:table-cell text-right">1st Review</TableHead>
+                            <TableHead className="hidden lg:table-cell text-right pr-6">Cycle Time</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {paginated.map((pr: any) => (
-                            <TableRow key={pr.githubPrId} className="group">
-                                <TableCell className="pl-6 text-muted-foreground text-xs tabular-nums">
-                                    {pr.number}
-                                </TableCell>
-                                <TableCell className="max-w-70">
-                                    <a
-                                        href={`https://github.com/${repoId}/pull/${pr.number}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="flex items-center gap-1.5 font-medium text-sm hover:underline"
-                                    >
-                                        <span className="truncate">{pr.title}</span>
-                                        <ExternalLinkIcon className="size-3 shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
-                                    </a>
-                                    {pr.isDraft && (
-                                        <span className="text-[10px] text-muted-foreground">Draft</span>
-                                    )}
-                                </TableCell>
-                                <TableCell className="hidden sm:table-cell">
-                                    <div className="flex items-center gap-2">
-                                        <Avatar className="h-5 w-5">
-                                            <AvatarImage
-                                                src={`https://github.com/${pr.authorLogin}.png?size=32`}
-                                                alt={pr.authorLogin}
-                                            />
-                                            <AvatarFallback className="text-[9px]">
-                                                {pr.authorLogin.slice(0, 2).toUpperCase()}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <span className="text-xs text-muted-foreground">
-                                            {pr.authorLogin}
-                                        </span>
-                                    </div>
-                                </TableCell>
-                                <TableCell className="hidden md:table-cell">
-                                    <Badge
-                                        variant="outline"
-                                        className={`text-[10px] capitalize ${STATE_STYLES[pr.state] ?? ""}`}
-                                    >
-                                        {pr.state}
-                                    </Badge>
-                                </TableCell>
-                                <TableCell className="hidden md:table-cell">
-                                    {pr.prSize && (
-                                        <Badge
-                                            variant="outline"
-                                            className={`text-[10px] capitalize ${SIZE_STYLES[pr.prSize] ?? ""}`}
-                                        >
-                                            {pr.prSize}
-                                        </Badge>
-                                    )}
-                                </TableCell>
-                                <TableCell className="hidden lg:table-cell text-right text-xs tabular-nums text-muted-foreground">
-                                    {formatMins(pr.timeToFirstReview)}
-                                </TableCell>
-                                <TableCell className="hidden lg:table-cell text-right text-xs tabular-nums text-muted-foreground pr-6">
-                                    {formatMins(pr.cycleTime ? pr.cycleTime * 60 : null)}
+                        {isLoading ? (
+                            [...Array(5)].map((_, i) => (
+                                <TableRow key={i}>
+                                    {[...Array(7)].map((_, j) => (
+                                        <TableCell key={j}>
+                                            <div className="h-4 rounded bg-muted animate-pulse" />
+                                        </TableCell>
+                                    ))}
+                                </TableRow>
+                            ))
+                        ) : prs.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                                    No pull requests match your filters.
                                 </TableCell>
                             </TableRow>
-                        ))}
+                        ) : (
+                            prs.map((pr) => (
+                                <TableRow key={pr.githubPrId} className="group">
+                                    <TableCell className="pl-6 text-muted-foreground text-xs tabular-nums">
+                                        {pr.number}
+                                    </TableCell>
+                                    <TableCell className="max-w-70">
+                                        <a
+                                            href={`https://github.com/${owner}/${name}/pull/${pr.number}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 font-medium text-sm hover:underline"
+                                        >
+                                            <span className="truncate">{pr.title}</span>
+                                            <ExternalLinkIcon className="size-3 shrink-0 opacity-0 group-hover:opacity-60 transition-opacity" />
+                                        </a>
+                                        {pr.isDraft && (
+                                            <span className="text-[10px] text-muted-foreground">Draft</span>
+                                        )}
+                                    </TableCell>
+                                    <TableCell className="hidden sm:table-cell">
+                                        <div className="flex items-center gap-2">
+                                            <Avatar className="h-5 w-5">
+                                                <AvatarImage
+                                                    src={`https://github.com/${pr.authorLogin}.png?size=32`}
+                                                    alt={pr.authorLogin}
+                                                />
+                                                <AvatarFallback className="text-[9px]">
+                                                    {pr.authorLogin.slice(0, 2).toUpperCase()}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            <span className="text-xs text-muted-foreground">
+                                                {pr.authorLogin}
+                                            </span>
+                                        </div>
+                                    </TableCell>
+                                    <TableCell className="hidden md:table-cell">
+                                        <Badge
+                                            variant="outline"
+                                            className={`text-[10px] capitalize ${STATE_STYLES[pr.state] ?? ""}`}
+                                        >
+                                            {pr.state}
+                                        </Badge>
+                                    </TableCell>
+                                    <TableCell className="hidden md:table-cell">
+                                        {pr.prSize && (
+                                            <Badge
+                                                variant="outline"
+                                                className={`text-[10px] capitalize ${SIZE_STYLES[pr.prSize] ?? ""}`}
+                                            >
+                                                {pr.prSize}
+                                            </Badge>
+                                        )}
+                                    </TableCell>
+                                    <TableCell className="hidden lg:table-cell text-right text-xs tabular-nums text-muted-foreground">
+                                        {formatMins(pr.timeToFirstReview)}
+                                    </TableCell>
+                                    <TableCell className="hidden lg:table-cell text-right text-xs tabular-nums text-muted-foreground pr-6">
+                                        {pr.cycleTime !== null ? `${pr.cycleTime}h` : "—"}
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
                     </TableBody>
                 </Table>
 
-                {/* Pagination */}
-                {pages > 1 && (
-                    <div className="flex items-center justify-between border-t px-6 py-3">
-                        <span className="text-xs text-muted-foreground">
-                            Page {page + 1} of {pages}
-                        </span>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={() => setPage(p => Math.max(0, p - 1))}
-                                disabled={page === 0}
-                                className="rounded-md border px-2.5 py-1 text-xs disabled:opacity-40 hover:bg-muted transition-colors"
-                            >
-                                Previous
-                            </button>
-                            <button
-                                onClick={() => setPage(p => Math.min(pages - 1, p + 1))}
-                                disabled={page >= pages - 1}
-                                className="rounded-md border px-2.5 py-1 text-xs disabled:opacity-40 hover:bg-muted transition-colors"
-                            >
-                                Next
-                            </button>
-                        </div>
+                {/* Load more */}
+                {hasNextPage && (
+                    <div className="flex justify-center border-t py-4">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => fetchNextPage()}
+                            disabled={isFetchingNextPage}
+                            className="gap-2"
+                        >
+                            {isFetchingNextPage && (
+                                <Loader2Icon className="h-3.5 w-3.5 animate-spin" />
+                            )}
+                            {isFetchingNextPage ? "Loading..." : "Load more"}
+                        </Button>
+                    </div>
+                )}
+
+                {/* End of results */}
+                {!hasNextPage && prs.length > 0 && (
+                    <div className="border-t py-3 text-center text-xs text-muted-foreground">
+                        All {totalFetched} pull requests loaded
                     </div>
                 )}
             </CardContent>

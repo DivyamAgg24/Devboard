@@ -93,7 +93,7 @@ function MetricsDashboardInner({ owner, name }: { owner: string; name: string })
             <ContributorLeaderboard contributors={metrics.contributors} />
 
             {/* PR list */}
-            <PRDataTable repoId={`${owner}/${name}`} />
+            <PRDataTable owner={owner} name={name} />
 
         </div>
     )

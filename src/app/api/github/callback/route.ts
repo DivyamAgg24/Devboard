@@ -2,16 +2,22 @@
 import { NextResponse } from "next/server";
 import { db } from "@/src/lib/prisma";
 import { encryptToken } from "@/src/lib/crypto";
-import { createGitHubSession } from "@/src/utils/session";
+import { getSession } from "@/src/utils/session";
 
 export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const code = searchParams.get("code");
     const userId = searchParams.get("state");
     const scope = searchParams.get("scope")
-
-    if (!code || !userId) {
+    const session = await getSession()
+    if (!session || !session.user){
+        return NextResponse.json({error: "UNAUTHORIZED", status: 401})
+    }
+    if (!code || !userId ) {
         return NextResponse.redirect("/?error=github_failed");
+    }
+    if (userId !== session.user.id){
+        return NextResponse.json({error: "MISMATCHING STATE", status: 401});
     }
 
     // Exchange code for access token
@@ -30,7 +36,7 @@ export async function GET(req: Request) {
     });
 
     const tokenData = await tokenRes.json();
-    console.log(tokenData)
+    console.log("Tokendata: ", tokenData)
     if (tokenData.error || !tokenData.access_token) {
         return NextResponse.redirect("/?error=github_token_failed");
     }
@@ -49,7 +55,8 @@ export async function GET(req: Request) {
         create: {
             userId,
             provider: "GitHub",
-            scope: tokenData.scope
+            scope: tokenData.scope,
+            accessToken: tokenData.access_token
         },
         select: {
             id: true,
@@ -57,7 +64,6 @@ export async function GET(req: Request) {
         }
     });
 
-    const session = await createGitHubSession(tokenData.access_token)
 
     return NextResponse.redirect("http://localhost:3000/dashboard");
 }

@@ -8,7 +8,7 @@ import { RepoDashboard } from "@/src/components/RepoDashboard"
 
 export default async function DashboardPage() {
     const githubSession = await getGithubSession()
-
+    console.log("Githubsession: ", githubSession)
     if (!githubSession?.success) {
         return (
             <>
@@ -28,20 +28,21 @@ export default async function DashboardPage() {
             </>
         )
     }
-
-    const queryClient = getQueryClient()
-    void queryClient.prefetchQuery(trpc.github.repos.queryOptions())
-
-    return (
-        <>
-            <SiteHeader title="Dashboard" />
-            <div className="flex flex-1 flex-col">
-                <div className="@container/main flex flex-1 flex-col gap-2">
-                    <HydrationBoundary state={dehydrate(queryClient)}>
-                        <RepoDashboard />
-                    </HydrationBoundary>
+    else{
+        const queryClient = getQueryClient()
+        void queryClient.prefetchQuery(trpc.github.repos.queryOptions())
+    
+        return (
+            <>
+                <SiteHeader title="Dashboard" />
+                <div className="flex flex-1 flex-col">
+                    <div className="@container/main flex flex-1 flex-col gap-2">
+                        <HydrationBoundary state={dehydrate(queryClient)}>
+                            <RepoDashboard />
+                        </HydrationBoundary>
+                    </div>
                 </div>
-            </div>
-        </>
-    )
+            </>
+        )
+    }
 }
